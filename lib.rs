@@ -3,7 +3,7 @@
 use pink_extension as pink;
 
 #[pink::contract(env=PinkEnvironment)]
-mod test_oracle {
+mod twitter_oracle {
 
     use ink_env::AccountId;
     use ink_prelude::{string::{String, ToString}, vec::Vec};
@@ -23,7 +23,7 @@ mod test_oracle {
     #[ink(storage)]
     #[derive(SpreadAllocate)]
     #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
-    pub struct TestOracle {
+    pub struct TwitterOracle {
         admin: AccountId,
         badge_contract_options: Option<(AccountId, u32)>,
         attestation_verifier: attestation::Verifier,
@@ -49,7 +49,7 @@ mod test_oracle {
         InvalidBody
     }
 
-    impl TestOracle {
+    impl TwitterOracle {
 
         #[ink(constructor)]
         pub fn new() -> Self {
@@ -155,11 +155,6 @@ mod test_oracle {
     mod tests {
         use super::*;
         use ink_lang as ink;
-
-        // #[ink::test]
-        // fn it_works() {
-        //     let mut test_oracle = TestOracle::new(false);
-        // }
 
         #[ink::test]
         fn can_parse_tweet_url() {
