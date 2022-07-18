@@ -32,6 +32,7 @@ mod twitter_oracle {
     use scale::{Decode, Encode};
     use fat_utils::attestation;
 
+    use ink_prelude::borrow::ToOwned;
     use serde::Deserialize;
     use serde_json_core;
 
@@ -78,19 +79,26 @@ mod twitter_oracle {
                 this.attestation_verifier = verifier
             })
         }
+
     }
 
     impl SubmittableOracle for TwitterOracle {
 
         #[ink(message)]
         fn attest(&self, url: String) -> core::result::Result<attestation::Attestation, Vec<u8>> {
+
+            // Get username, tweet_id from "https://twitter.com/FokChristopher/status/1546748557595930625"
             let tweet_url = parse_tweet_url(&url).map_err(|e| e.encode())?;
 
-            // Fetch the tweet content
-            // TODO: Add bearer token to the http request -- curl "https://api.twitter.com/2/tweets?ids=1426724855672541191" -H "Authorization: Bearer $BEARER_TOKEN"
+            // Format API url with tweet_id in "https://api.twitter.com/2/tweets?ids={id}"
+            let mut req_url: String = "https://api.twitter.com/2/tweets?ids=".to_owned();
+            let tweet_id: &str = &tweet_url.tweet_id;
+            req_url.push_str((tweet_id));
+
+            // Fetch the tweet content: curl "https://api.twitter.com/2/tweets?ids=1426724855672541191" -H "Authorization: Bearer $BEARER_TOKEN"
             let bearer_token: String = "Bearer AAAAAAAAAAAAAAAAAAAAACXsegEAAAAAmmADAF97nZBWgu1JDKG8ALb6lf8%3DduplCmqITqrQcjsIkovyPPbsu5WY6GNrcjsamf61obQrkJbE44".to_string();
             let headers: Vec<(String, String)> = vec![("Authorization".into(), bearer_token)];
-            let response = http_get!(url, headers);
+            let response = http_get!(req_url, headers);
             if response.status_code != 200 {
                 return Err(Error::RequestFailed.encode());
             }
@@ -189,6 +197,7 @@ mod twitter_oracle {
 
     #[cfg(test)]
     mod tests {
+        use ink_env::test::{default_accounts, DefaultAccounts};
         use super::*;
         use ink_lang as ink;
 
@@ -229,6 +238,41 @@ mod twitter_oracle {
                 extract_claim(b"This tweet is owned by address: 0xXX23456789012345678901234567890123456789012345678901234567890123"),
                 Err(Error::InvalidAddress),
             );
+        }
+
+        #[ink::test]
+        fn can_attest_http_get() {
+
+            // import Phala's test suite?
+            use pink_extension::chain_extension::{mock, HttpResponse};
+            fatutils::test_helper::mock_all();
+            let accounts: DefaultAccounts<PinkEnvironment> = default_accounts();
+
+            use fat_badges::issuable::mock_issuable;
+            use openbrush::traits::mock::{Addressable, SharedCallStack};
+
+            let stack = SharedCallStack::new(accounts.alice);
+            mock_issuable::using(stack.clone(), || {
+
+                // Construct our contract (deployed by `accounts.alice` by default)
+                let contract = Addressable::create_native(1, EasyOracle::new(), stack);
+
+                // Generate an attestation
+                //
+                // Mock a http request first (the 256 bits account id is the pubkey of Alice)
+                mock::mock_http_request(|_| {
+                    HttpResponse::ok(
+                        b"This gist is owned by address: 0x0101010101010101010101010101010101010101010101010101010101010101".to_vec())
+                });
+                let result = contract.call().attest(
+                    "https://twitter.com/FokChristopher/status/1546748557595930625".to_string());
+                assert!(result.is_ok());
+
+                let attestation = result.unwrap();
+                let data: GistQuote = Decode::decode(&mut &attestation.data[..]).unwrap();
+                assert_eq!(data.username, "FokChristopher");
+                assert_eq!(data.account_id, accounts.alice);
+            });
         }
     }
 }
