@@ -20,7 +20,7 @@ pink-extension = { version = "0.1.5", default-features = false }
 fat_utils = { path = "../utils", default-features = false }
 
 serde = { version = "1.0.137", default-features = false, features = ["derive", "alloc"]}
-serde-json-core = { version = "0.4.0" , default-features = false }
+serde-json-core = { version = "0.4.0", default-features = false }
 
 [lib]
 name = "twitter_oracle"
@@ -39,5 +39,9 @@ std = [
     "ink_primitives/std",
     "scale/std",
     "scale-info/std",
+    "pink-extension/std",
+    "fat_utils/std",
+    "serde-json-core/std",
+    "serde/std"
 ]
 ink-as-dependency = []

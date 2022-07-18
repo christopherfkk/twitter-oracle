@@ -1,24 +1,39 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![feature(trace_macros)]
 
+use fat_utils::attestation;
+use ink_env::AccountId;
+use ink_lang as ink;
+use ink_prelude::{string::String, vec::Vec};
 use pink_extension as pink;
+
+#[ink::trait_definition]
+pub trait SubmittableOracle {
+    #[ink(message)]
+    fn admin(&self) -> AccountId;
+
+    #[ink(message)]
+    fn verifier(&self) -> attestation::Verifier;
+
+    #[ink(message)]
+    fn attest(&self, arg: String) -> Result<attestation::Attestation, Vec<u8>>;
+}
 
 #[pink::contract(env=PinkEnvironment)]
 mod twitter_oracle {
+    use super::pink;
+    use super::SubmittableOracle;
 
-    use ink_env::AccountId;
     use ink_prelude::{string::{String, ToString}, vec::Vec};
+    use ink_prelude::vec;
     use ink_storage::traits::SpreadAllocate;
     use ink_storage::Mapping;
-    use pink_extension::http_get;
-
-    use scale::{Decode, Encode};
-    use scale::alloc::borrow::Cow;
-
-    use fat_utils::attestation;
     use pink::{http_get, PinkEnvironment};
+    use scale::{Decode, Encode};
+    use fat_utils::attestation;
 
     use serde::Deserialize;
-    use serde_json_core::from_slice;
+    use serde_json_core;
 
     #[ink(storage)]
     #[derive(SpreadAllocate)]
@@ -63,10 +78,12 @@ mod twitter_oracle {
                 this.attestation_verifier = verifier
             })
         }
+    }
+
+    impl SubmittableOracle for TwitterOracle {
 
         #[ink(message)]
-        pub fn attest(&self, url: String) -> core::result::Result<attestation::Attestation, Vec<u8>> {
-
+        fn attest(&self, url: String) -> core::result::Result<attestation::Attestation, Vec<u8>> {
             let tweet_url = parse_tweet_url(&url).map_err(|e| e.encode())?;
 
             // Fetch the tweet content
@@ -80,29 +97,43 @@ mod twitter_oracle {
 
             // TODO: Parse JSON body {"data": [{"id": <tweet_id>, "text": <tweet_content>}], e.g. {"data":[{"id":"1426724855672541191","text":"This tweet belongs to address:... "}]}
             let body = response.body;
-            let (data, _): (Data, usize) =
-                serde_json_core::from_slice(&body).or(Err(Error::InvalidBody))?;
-            let text = data.data[0].text.clone();
-
-            let account_id = extract_claim(&text).map_err(|e| e.encode())?;
+            let account_id = extract_claim(&body).map_err(|e| e.encode())?;
             let content = TweetContent { username: tweet_url.username, account_id, };
             let result = self.attestation_generator.sign(content);
             Ok(result)
+        }
+
+        #[ink(message)]
+        fn admin(&self) -> AccountId {
+            self.admin.clone()
+        }
+
+        /// The attestation verifier
+        #[ink(message)]
+        fn verifier(&self) -> attestation::Verifier {
+            self.attestation_verifier.clone()
         }
     }
 
     // TODO: Create struct for JSON to deserialize into {"data": [{"id": <tweet_id>, "text": <tweet_content>}]}
     #[derive(Deserialize, Debug)]
-    pub struct Data {
+    pub struct Data<'a> {
         #[serde(borrow)]
-        data: Vec<Params>
+        data: Vec<Params<'a>>
     }
 
     // TODO: Create struct for JSON to deserialize into {"data": [{"id": <tweet_id>, "text": <tweet_content>}]}
     #[derive(Deserialize, Debug)]
-    pub struct Params {
-        id: u32,
-        text: String
+    pub struct Params<'a> {
+        id: &'a str,
+        text: &'a str
+    }
+
+    #[derive(Clone, Encode, Decode, Debug)]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub struct TweetContent {
+        username: String,
+        account_id: AccountId,
     }
 
     fn parse_tweet_url(url: &str) -> Result<TweetURL, Error> {
@@ -128,10 +159,15 @@ mod twitter_oracle {
     const CLAIM_PREFIX: &str = "This tweet is owned by address: 0x";
     const ADDRESS_LEN: usize = 64;
 
-    fn extract_claim(body: &String) -> Result<AccountId, Error> {
-        // let body: Cow<str> = String::from_utf8_lossy(body);
-        let pos = body.find(CLAIM_PREFIX).ok_or(Error::NoClaimFound)?;
-        let addr: String = body
+    fn extract_claim(body: &[u8]) -> Result<AccountId, Error> {
+
+        // TODO: extract actual tweet from bytes of JSON text
+        let (data, _): (Data, usize) =
+                serde_json_core::from_slice(body).or(Err(Error::InvalidBody))?;
+        let text: &str = data.data[0].text;
+
+        let pos = text.find(CLAIM_PREFIX).ok_or(Error::NoClaimFound)?;
+        let addr: String = text
             .chars()
             .skip(pos)
             .skip(CLAIM_PREFIX.len())
