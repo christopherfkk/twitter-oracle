@@ -93,7 +93,7 @@ mod twitter_oracle {
             // Format API url with tweet_id in "https://api.twitter.com/2/tweets?ids={id}"
             let mut req_url: String = "https://api.twitter.com/2/tweets?ids=".to_owned();
             let tweet_id: &str = &tweet_url.tweet_id;
-            req_url.push_str((tweet_id));
+            req_url.push_str(tweet_id);
 
             // Fetch the tweet content: curl "https://api.twitter.com/2/tweets?ids=1426724855672541191" -H "Authorization: Bearer $BEARER_TOKEN"
             let bearer_token: String = "Bearer AAAAAAAAAAAAAAAAAAAAACXsegEAAAAAmmADAF97nZBWgu1JDKG8ALb6lf8%3DduplCmqITqrQcjsIkovyPPbsu5WY6GNrcjsamf61obQrkJbE44".to_string();
@@ -218,7 +218,12 @@ mod twitter_oracle {
 
         #[ink::test]
         fn can_decode_claim() {
-            let ok: Result<AccountId, Error> = extract_claim(b"...This tweet is owned by address: 0x0123456789012345678901234567890123456789012345678901234567890123...");
+
+            // Test JSON response from twitter API
+            let json: &str = r#"{"{"data":[{"id":"1426724855672541191","text":"This tweet belongs to address: 0123456789012345678901234567890123456789012345678901234567890123"}]}"#;
+            let body = json.as_bytes();
+
+            let ok: Result<AccountId, Error> = extract_claim(body);
             assert_eq!(
                 ok,
                 decode_account_id_256(
@@ -245,34 +250,23 @@ mod twitter_oracle {
 
             // import Phala's test suite?
             use pink_extension::chain_extension::{mock, HttpResponse};
-            fatutils::test_helper::mock_all();
+            fat_utils::test_helper::mock_all();
             let accounts: DefaultAccounts<PinkEnvironment> = default_accounts();
 
-            use fat_badges::issuable::mock_issuable;
-            use openbrush::traits::mock::{Addressable, SharedCallStack};
+            let mut contract = TwitterOracle::new();
 
-            let stack = SharedCallStack::new(accounts.alice);
-            mock_issuable::using(stack.clone(), || {
-
-                // Construct our contract (deployed by `accounts.alice` by default)
-                let contract = Addressable::create_native(1, EasyOracle::new(), stack);
-
-                // Generate an attestation
-                //
-                // Mock a http request first (the 256 bits account id is the pubkey of Alice)
-                mock::mock_http_request(|_| {
-                    HttpResponse::ok(
-                        b"This gist is owned by address: 0x0101010101010101010101010101010101010101010101010101010101010101".to_vec())
-                });
-                let result = contract.call().attest(
-                    "https://twitter.com/FokChristopher/status/1546748557595930625".to_string());
-                assert!(result.is_ok());
-
-                let attestation = result.unwrap();
-                let data: GistQuote = Decode::decode(&mut &attestation.data[..]).unwrap();
-                assert_eq!(data.username, "FokChristopher");
-                assert_eq!(data.account_id, accounts.alice);
+            mock::mock_http_request(|_| {
+                HttpResponse::ok(
+                    b"This tweet is owned by address: 0x0101010101010101010101010101010101010101010101010101010101010101".to_vec())
             });
+            let result = contract.attest(
+                "https://twitter.com/FokChristopher/status/1546748557595930625".to_string());
+            assert!(result.is_ok());
+
+            let attestation = result.unwrap();
+            let data: TweetContent = Decode::decode(&mut &attestation.data[..]).unwrap();
+            assert_eq!(data.username, "FokChristopher");
+            assert_eq!(data.account_id, accounts.alice);
         }
     }
 }
