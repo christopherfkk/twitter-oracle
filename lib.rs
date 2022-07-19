@@ -161,7 +161,7 @@ mod twitter_oracle {
             if response.status_code != 200 {
                 return Err(Error::RequestFailed.encode());
             }
-            ink_env::debug_println!("Response body: {:?}", std::str::from_utf8(&response.body).unwrap());
+            ink_env::debug_println!("Response body: {:?}", String::from_utf8_lossy(&response.body));
 
             // Deserialize JSON byte array into Rust structs, e.g. {"data": [{"id": <tweet_id>, "text": <tweet>}]}
             let data: TweetData = serde_json_core::from_slice(&response.body)
@@ -256,6 +256,7 @@ mod twitter_oracle {
     mod tests {
         use super::*;
         use ink_lang as ink;
+        use ink_env::Clear;
 
         #[ink::test]
         fn can_parse_tweet_url() {
@@ -353,22 +354,27 @@ mod twitter_oracle {
             let stack = SharedCallStack::new(accounts.alice);
             let contract = Addressable::create_native(1, TwitterOracle::new(), stack);
 
+            // Test JSON byte array from twitter API
             let json: &str = r#"{"data":[{"id":"1426724855672541191","text":"This tweet is owned by address: 0x0101010101010101010101010101010101010101010101010101010101010101"}]}"#;
             let body = json.as_bytes();
             mock::mock_http_request(|_| { HttpResponse::ok(body.to_vec()) });
 
+            // Attest API Response
             let res = contract
                 .call()
                 .attest(
                 "https://twitter.com/FokChristopher/status/1546748557595930625".to_string());
             let attestation = res.unwrap();
 
+            // Add it to linked users
             let result = contract
                 .call_mut()
                 .verify_identity(attestation);
 
             assert!(result.is_ok());
-            assert_eq!(contract.call().linked_users.get("FokChristopher").unwrap(), accounts.alice );
+            assert_eq!(
+                contract.call().linked_users.get("FokChristopher").unwrap(),
+                accounts.alice );
         }
     }
 }
